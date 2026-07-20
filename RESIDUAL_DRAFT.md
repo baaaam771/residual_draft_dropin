@@ -9,8 +9,9 @@ models/drafts/residual_draft.py       ~3M CNN: dv_hat + log e_cache + log e_draf
 token_selectors/three_tier.py         2-score routing, hard_idx [B,k] 오름차순
 training/train_residual_draft.py      기존 router_teacher 덤프로 학습 (재수집 불필요)
 training/eval_residual_router.py      offline gate (Stage 3 GPU 실행 전 필수)
+training/diagnose_residual.py         v1 정보병목 가설 검증 (offset별 ratio, dz-identity)
 samplers/three_tier_flux_fill.py      method: draft_only(Stage 3) / three_tier(Stage 4)
-tests/test_residual_draft.py          회귀 테스트 11개 (CPU)
+tests/test_residual_draft.py          회귀 테스트 12개 (CPU)
 ```
 
 ## Routing
@@ -92,6 +93,36 @@ python -m samplers.three_tier_flux_fill ... --cache-period 5 --method draft_only
 
 GPU job은 **순차 실행** (wall-time 오염 방지). 평가는 기존 eval 파이프라인
 (mask-LPIPS→ref 등)을 run.json + png 출력에 그대로 적용.
+
+## v1 60k 결과 판독과 v2 (content inputs)
+
+v1 60k run: L_res 평탄(1.7e-3 → 1.5e-3), mse_ratio ≈ 1.00 전 구간,
+error-head spearman 0.65–0.74. **residual head는 실패, error head는 성공.**
+
+원인 (정보 병목): dense Euler에서 `z_{a+1} = z_a + Δσ·v_a` → offset-1 pair
+(c=2 전부, c=3 절반)의 `dz = Δσ·v_anchor`는 anchor 상태의 결정론적 함수이고,
+v1 입력(v_a, dz, mask, Δσ)에는 이미지 콘텐츠가 전혀 없다. residual의 예측
+가능한 성분은 콘텐츠(x̂0)와 절대 σ에 실려 있는데 그 입력이 빠져 있었다.
+
+v2: `--use-latent --use-anchor-x0 --use-sigma-t` (신규 학습 기본 ON) —
+z_t는 sparse step에서 공짜, x̂0_a는 cache.anchor_clean_estimate로 이미 존재.
+v1 checkpoint는 config에 flag가 없으므로 기본 OFF로 그대로 로드된다 (호환).
+
+순서:
+```bash
+# 0) 가설 검증 (v1 ckpt, GPU 수 분)
+python -m training.diagnose_residual --teacher $TEACH --ckpt $CKPT/last.pt
+#   기대: offset-1 dz-identity rel err ~1e-3 이하 (bf16 덤프 오차 수준),
+#         offset-1 ratio ≈ 1.0, offset-2도 ≈ 1.0 (콘텐츠 없이는 못 배움)
+
+# 1) v2 재학습 (새 out 디렉토리)
+python -m training.train_residual_draft --teacher $TEACH     --out ${CKPT}_v2 --steps 60000 --cache-periods 2 3
+#   판정 지점: val mse_ratio_in_mask가 2k step 내에 1.0 아래로 내려가기
+#   시작하는가. 60k까지 1.0이면 콘텐츠를 줘도 residual 외삽이 안 되는 것 —
+#   그 자체로 측정된 negative result (caching은 되고 extrapolation은 안 된다).
+#   그 경우 error head 2개(spearman 0.65+)를 기존 learned router 자리에 넣는
+#   router-reliability 기여로 pivot.
+```
 
 ## 첫 실행 전 5-image closed-loop 진단 (필수)
 

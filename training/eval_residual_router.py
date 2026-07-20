@@ -41,6 +41,17 @@ from training.train_residual_draft import (LOG_EPS, ResidualTeacherPairs,
                                            spearman)
 
 
+def _content_kwargs(net, it, device):
+    kw = {}
+    if net.config.get("use_latent"):
+        kw["z_t"] = it["z_t"].unsqueeze(0).to(device)
+    if net.config.get("use_anchor_x0"):
+        kw["x0_anchor"] = it["x0_anchor"].unsqueeze(0).to(device)
+    if net.config.get("use_sigma_t"):
+        kw["sigma_t"] = it["sigma_t"].view(1).to(device)
+    return kw
+
+
 def top_r_capture(pred: torch.Tensor, true: torch.Tensor, r: float) -> float:
     n = true.numel()
     k = max(int(round(r * n)), 1)
@@ -98,7 +109,8 @@ def main():
         dsig = it["dsigma"].view(1).to(device)
         hw = it["token_hw"]
 
-        dv_hat, log_ec, log_ed = net(v_a, dz, mask, dsig, hw)
+        dv_hat, log_ec, log_ed = net(v_a, dz, mask, dsig, hw,
+                                     **_content_kwargs(net, it, device))
         e_c = dv_star.pow(2).mean(-1)                       # true, [1, N]
         e_d = (dv_hat - dv_star).pow(2).mean(-1)
         ec_hat, ed_hat = ResidualDraftNet.routing_errors(log_ec, log_ed)

@@ -196,6 +196,30 @@ def test_teacher_pair_never_uses_anchor_step():
             assert float(it["dsigma"].abs()) > 0, "degenerate zero-pair"
 
 
+def test_content_inputs_and_v1_compat():
+    """v2 content inputs change in_ch as configured; v1 4-key configs still
+    load with content flags defaulting OFF (checkpoint compat)."""
+    v1_cfg = {"latent_ch": 64, "hidden": 192, "num_blocks": 4,
+              "detach_error_trunk": False}
+    net_v1 = ResidualDraftNet(**v1_cfg)
+    assert net_v1.stem.in_channels == 2 * 64 + 3
+    net_v2 = ResidualDraftNet(hidden=64, num_blocks=2, use_latent=True,
+                              use_anchor_x0=True, use_sigma_t=True)
+    assert net_v2.stem.in_channels == 4 * 64 + 4
+    dv, _, _ = net_v2(torch.randn(1, N, 64), torch.randn(1, N, 64), _mask(),
+                      torch.tensor([-0.05]), HW,
+                      z_t=torch.randn(1, N, 64),
+                      x0_anchor=torch.randn(1, N, 64),
+                      sigma_t=torch.tensor([0.5]))
+    assert dv.abs().max().item() == 0.0, "zero-init must survive v2"
+    try:
+        net_v2(torch.randn(1, N, 64), torch.randn(1, N, 64), _mask(),
+               torch.tensor([-0.05]), HW)
+        raise SystemExit("v2 net must demand its content inputs")
+    except AssertionError:
+        pass
+
+
 def test_zero_init_equals_reuse():
     torch.manual_seed(0)
     net = ResidualDraftNet(hidden=64, num_blocks=2)

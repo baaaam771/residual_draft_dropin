@@ -102,6 +102,7 @@ class ResidualTeacherPairs:
         c = rng.choice(self.cache_periods)
         i = rng.choice(self.valid_steps[c])        # never an anchor step
         a = i - (i % c)
+        sig_a = sh["sigmas"][a].float()
         return {
             "v_anchor": sh["preds"][a].float(),            # [N, 64]
             "dz": (sh["latents"][i] - sh["latents"][a]).float(),
@@ -109,22 +110,43 @@ class ResidualTeacherPairs:
             "mask_tok": sh["mask_tok"].float(),
             "dsigma": (sh["sigmas"][i] - sh["sigmas"][a]).float(),
             "token_hw": tuple(sh["token_hw"]),
+            # v2 content inputs (free at a sparse step / from the anchor cache)
+            "z_t": sh["latents"][i].float(),
+            "x0_anchor": (sh["latents"][a].float()
+                          - sig_a * sh["preds"][a].float()),
+            "sigma_t": sh["sigmas"][i].float(),
             # debug/test metadata (not stacked by batch())
             "step": i, "anchor_step": a, "cache_period": c,
         }
 
+    BATCH_KEYS = ("v_anchor", "dz", "dv_star", "mask_tok", "dsigma",
+                  "z_t", "x0_anchor", "sigma_t")
+
     def batch(self, bs, rng, device):
         items = [self.sample(rng) for _ in range(bs)]
-        hw = items[0]["token_hw"]
-        st = lambda k: torch.stack([it[k] for it in items]).to(device)
-        return (st("v_anchor"), st("dz"), st("dv_star"), st("mask_tok"),
-                st("dsigma"), hw)
+        out = {k: torch.stack([it[k] for it in items]).to(device)
+               for k in self.BATCH_KEYS}
+        out["token_hw"] = items[0]["token_hw"]
+        return out
 
 
 # ----------------------------------------------------------------- losses ---
+def content_kwargs(net, batch):
+    kw = {}
+    if net.config.get("use_latent"):
+        kw["z_t"] = batch["z_t"]
+    if net.config.get("use_anchor_x0"):
+        kw["x0_anchor"] = batch["x0_anchor"]
+    if net.config.get("use_sigma_t"):
+        kw["sigma_t"] = batch["sigma_t"]
+    return kw
+
+
 def compute_losses(net, batch, mask_weight, lambda_cache, lambda_draft):
-    v_a, dz, dv_star, mask_tok, dsig, hw = batch
-    dv_hat, log_ec, log_ed = net(v_a, dz, mask_tok, dsig, hw)
+    v_a, dz, dv_star = batch["v_anchor"], batch["dz"], batch["dv_star"]
+    mask_tok, dsig, hw = batch["mask_tok"], batch["dsigma"], batch["token_hw"]
+    dv_hat, log_ec, log_ed = net(v_a, dz, mask_tok, dsig, hw,
+                                 **content_kwargs(net, batch))
     w = 1.0 + (mask_weight - 1.0) * (mask_tok > 0.5).float()      # [B, N]
     res_err = (dv_hat - dv_star).pow(2).mean(-1)                  # [B, N]
     loss_res = (w * res_err).sum() / w.sum()
@@ -150,8 +172,11 @@ def validate(net, pairs, rng, device, bs, n_batches):
     sr = sd = sri = sdi = 0.0
     sp_c = sp_d = 0.0
     for _ in range(n_batches):
-        v_a, dz, dv_star, mask_tok, dsig, hw = pairs.batch(bs, rng, device)
-        dv_hat, log_ec, log_ed = net(v_a, dz, mask_tok, dsig, hw)
+        b = pairs.batch(bs, rng, device)
+        v_a, dz, dv_star, mask_tok = (b["v_anchor"], b["dz"], b["dv_star"],
+                                      b["mask_tok"])
+        dv_hat, log_ec, log_ed = net(v_a, dz, mask_tok, b["dsigma"],
+                                     b["token_hw"], **content_kwargs(net, b))
         e_c = dv_star.pow(2).mean(-1)
         e_d = (dv_hat - dv_star).pow(2).mean(-1)
         sr += float(e_c.sum()); sd += float(e_d.sum())
@@ -209,6 +234,13 @@ def main():
     ap.add_argument("--num-blocks", type=int, default=4, help="conv blocks")
     ap.add_argument("--detach-error-trunk", action="store_true",
                     help="stop error-head gradients at the shared trunk")
+    ap.add_argument("--use-latent", action=argparse.BooleanOptionalAction,
+                    default=True, help="feed current packed latent z_t")
+    ap.add_argument("--use-anchor-x0", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="feed anchor clean estimate x0_a (image content)")
+    ap.add_argument("--use-sigma-t", action=argparse.BooleanOptionalAction,
+                    default=True, help="feed absolute sigma_t plane")
     ap.add_argument("--val-frac", type=float, default=0.10,
                     help="image-level val fraction (same value in eval)")
     ap.add_argument("--calib-frac", type=float, default=0.10,
@@ -242,7 +274,10 @@ def main():
         cfg = ck["model_config"]
         cli_cfg = {"latent_ch": 64, "hidden": a.hidden,
                    "num_blocks": a.num_blocks,
-                   "detach_error_trunk": a.detach_error_trunk}
+                   "detach_error_trunk": a.detach_error_trunk,
+                   "use_latent": a.use_latent,
+                   "use_anchor_x0": a.use_anchor_x0,
+                   "use_sigma_t": a.use_sigma_t}
         if cli_cfg != cfg:
             print(f"[resume] WARNING: CLI arch {cli_cfg} != checkpoint arch "
                   f"{cfg}; using the CHECKPOINT config")
@@ -250,7 +285,10 @@ def main():
     else:
         ck = None
         net = ResidualDraftNet(hidden=a.hidden, num_blocks=a.num_blocks,
-                               detach_error_trunk=a.detach_error_trunk).to(device)
+                               detach_error_trunk=a.detach_error_trunk,
+                               use_latent=a.use_latent,
+                               use_anchor_x0=a.use_anchor_x0,
+                               use_sigma_t=a.use_sigma_t).to(device)
     ema = copy.deepcopy(net).eval()
     for p in ema.parameters():
         p.requires_grad_(False)

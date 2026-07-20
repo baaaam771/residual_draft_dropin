@@ -117,8 +117,16 @@ def sample_one_three_tier(pipe, runner: FluxSparseRunner, state, *,
                 dsig = torch.tensor(
                     [float(sigma) - float(cache.anchor_sigma)],
                     device=state.latents.device)
+                kw = {}
+                if net.config.get("use_latent"):
+                    kw["z_t"] = state.latents.float()
+                if net.config.get("use_anchor_x0"):
+                    kw["x0_anchor"] = cache.anchor_clean_estimate.float()
+                if net.config.get("use_sigma_t"):
+                    kw["sigma_t"] = torch.tensor(
+                        [float(sigma)], device=state.latents.device)
                 dv, log_ec, log_ed = net(v_a.float(), dz.float(),
-                                         mask_tok.float(), dsig, hw)
+                                         mask_tok.float(), dsig, hw, **kw)
                 e_c, e_d = ResidualDraftNet.routing_errors(log_ec, log_ed)
             with _CudaSpan(timing, "route_ms"):
                 tier, info = route_three_tier(e_c, e_d, mask_tok, hw, cfg)
