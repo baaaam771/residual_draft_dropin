@@ -34,7 +34,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
-from models.drafts.residual_draft import boundary_band_tok
+from resdraft.models.residual_draft import boundary_band_tok
 
 CACHE, DRAFT, TARGET = 0, 1, 2
 

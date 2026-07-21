@@ -44,7 +44,7 @@ Directional baseline: cos similarity between v_a and v_t (are they even
 close in direction?), and between dv* and -v_a (is the residual mostly
 "undo the anchor" or something new?).
 
-    PYTHONPATH=. python -m training.diagnose_residual_deep \
+    PYTHONPATH=. python -m resdraft.training.diagnose_residual_deep \
         --teacher /mnt/HDD_12TB/bam_ki/flux_fill/router_teacher_1024 \
         --pairs 400 --knn 16
 
@@ -111,7 +111,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
-    from training.train_residual_draft import ResidualTeacherPairs
+    from resdraft.training.train_residual_draft import ResidualTeacherPairs
     pairs = ResidualTeacherPairs(a.teacher, a.cache_periods, a.split,
                                  a.val_frac, a.calib_frac, a.dense_tail)
     rng = random.Random(a.seed)

@@ -27,7 +27,7 @@ with alpha*/dsigma and the best-fit residual. Interpretation (per review):
 fp16 note: shards store latents/preds in fp16; the fp16 quantisation floor on
 this rel-err metric is ~1e-3, so treat anything at or below that as exact.
 
-    PYTHONPATH=. python -m training.diagnose_transition \
+    PYTHONPATH=. python -m resdraft.training.diagnose_transition \
         --teacher /mnt/HDD_12TB/bam_ki/flux_fill/router_teacher_1024 --shards 6
 
 Argparse help strings contain no bare percent characters.

@@ -22,11 +22,11 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.drafts.residual_draft import ResidualDraftNet, boundary_band_tok
-from token_selectors.three_tier import (CACHE, DRAFT, TARGET, ThreeTierConfig,
+from resdraft.models.residual_draft import ResidualDraftNet, boundary_band_tok
+from resdraft.routing.three_tier import (CACHE, DRAFT, TARGET, ThreeTierConfig,
                                         compose_prediction, hard_indices,
                                         route_three_tier)
-from training.train_residual_draft import split_of
+from resdraft.training.train_residual_draft import split_of
 
 HW = (32, 32)                                   # 512^2 token grid
 N = HW[0] * HW[1]
@@ -162,7 +162,7 @@ def test_teacher_pair_never_uses_anchor_step():
     """Boundary case: steps=50, tail=4 -> hi=46; with c=3 the old sampler
     could nudge i to 45 (an anchor), yielding a degenerate zero pair."""
     import json
-    from training.train_residual_draft import ResidualTeacherPairs
+    from resdraft.training.train_residual_draft import ResidualTeacherPairs
 
     S, n_tok, hw = 50, 16, (4, 4)
     with tempfile.TemporaryDirectory() as td:
@@ -199,7 +199,7 @@ def test_teacher_pair_never_uses_anchor_step():
 def test_transition_bestfit_alpha():
     """dz = c * v must be recovered exactly by the best-fit scalar, and the
     C2 sign candidate must be worst — validates the convention probe."""
-    from training.diagnose_transition import cosine, rel_err
+    from resdraft.training.diagnose_transition import cosine, rel_err
     torch.manual_seed(0)
     v = torch.randn(256, 64)
     ds = -0.04
@@ -306,7 +306,7 @@ def test_error_head_router_interface():
     route residual-draft ckpts to it."""
     import tempfile as _tf
 
-    from models.drafts.error_head_router import ErrorHeadRouter, load_draft
+    from resdraft.models.error_head_router import ErrorHeadRouter, load_draft
     from models.flux_cache import FluxAnchorCache
     from utils.token_mapping import TokenGrid
 

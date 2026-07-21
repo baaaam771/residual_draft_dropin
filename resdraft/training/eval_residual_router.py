@@ -2,7 +2,7 @@
 GPU-expensive Stage 3/4 sampling. Runs on the held-out val/calib split of the
 router-teacher dumps.
 
-    PYTHONPATH=. python -m training.eval_residual_router \
+    PYTHONPATH=. python -m resdraft.training.eval_residual_router \
         --teacher /mnt/HDD_12TB/bam_ki/flux_fill/router_teacher_1024 \
         --ckpt /mnt/HDD_12TB/bam_ki/flux_fill/residual_draft_ckpt/last.pt
 
@@ -34,10 +34,10 @@ import random
 
 import torch
 
-from models.drafts.residual_draft import ResidualDraftNet, boundary_band_tok
-from token_selectors.three_tier import (CACHE, DRAFT, TARGET, ThreeTierConfig,
+from resdraft.models.residual_draft import ResidualDraftNet, boundary_band_tok
+from resdraft.routing.three_tier import (CACHE, DRAFT, TARGET, ThreeTierConfig,
                                         route_three_tier)
-from training.train_residual_draft import (LOG_EPS, ResidualTeacherPairs,
+from resdraft.training.train_residual_draft import (LOG_EPS, ResidualTeacherPairs,
                                            spearman)
 
 

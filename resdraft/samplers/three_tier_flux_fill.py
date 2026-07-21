@@ -41,7 +41,7 @@ import torch
 
 from data.dataset import FluxFillBenchmark
 from data.prompt_cache import load_cached
-from models.drafts.residual_draft import ResidualDraftNet
+from resdraft.models.residual_draft import ResidualDraftNet
 from models.flux_cache import FluxAnchorCache
 from models.flux_fill_loader import load_flux_fill
 from models.flux_sparse_transformer import FluxSparseRunner
@@ -49,7 +49,7 @@ from samplers.cached_flux_fill import get_model_provenance
 from samplers.dense_flux_fill import (_save_img, decode_latents,
                                       prepare_flux_fill_inputs, scheduler_step)
 from token_selectors.mask import mask_score
-from token_selectors.three_tier import (ThreeTierConfig, compose_prediction,
+from resdraft.routing.three_tier import (ThreeTierConfig, compose_prediction,
                                         hard_indices, route_three_tier)
 
 

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import torch
 
-from models.drafts.residual_draft import ResidualDraftNet
+from resdraft.models.residual_draft import ResidualDraftNet
 from models.flux_cache import FluxAnchorCache
 from utils.token_mapping import TokenGrid
 

@@ -12,7 +12,7 @@ content-independent conditional mean, and mse_ratio ~ 1.0 is an information
 limit — not a capacity or training bug. The fix is content inputs (z_t,
 anchor x0, sigma_t), not more steps.
 
-    PYTHONPATH=. python -m training.diagnose_residual \
+    PYTHONPATH=. python -m resdraft.training.diagnose_residual \
         --teacher /mnt/HDD_12TB/bam_ki/flux_fill/router_teacher_1024 \
         --ckpt /mnt/HDD_12TB/bam_ki/flux_fill/residual_draft_ckpt/last.pt
 
@@ -33,8 +33,8 @@ from collections import defaultdict
 
 import torch
 
-from models.drafts.residual_draft import ResidualDraftNet
-from training.train_residual_draft import LOG_EPS, ResidualTeacherPairs, spearman
+from resdraft.models.residual_draft import ResidualDraftNet
+from resdraft.training.train_residual_draft import LOG_EPS, ResidualTeacherPairs, spearman
 
 
 @torch.no_grad()

@@ -2,7 +2,7 @@
 EXISTING router-teacher dumps (samplers.dump_router_teacher format). No new
 GPU collection is needed: one dense-trajectory dump serves every cache period.
 
-    PYTHONPATH=. python -m training.train_residual_draft \
+    PYTHONPATH=. python -m resdraft.training.train_residual_draft \
         --teacher /mnt/HDD_12TB/bam_ki/flux_fill/router_teacher_1024 \
         --out /mnt/HDD_12TB/bam_ki/flux_fill/residual_draft_ckpt \
         --steps 60000 --cache-periods 2 3
@@ -42,7 +42,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from models.drafts.residual_draft import ResidualDraftNet
+from resdraft.models.residual_draft import ResidualDraftNet
 
 LOG_EPS = 1e-8
 
@@ -186,7 +186,7 @@ def validate(net, pairs, rng, device, bs, n_batches):
         sri += float(e_c[m].sum()); sdi += float(e_d[m].sum())
         sp_c += spearman(log_ec, torch.log(e_c + LOG_EPS))
         sp_d += spearman(log_ed, torch.log(e_d + LOG_EPS))
-        from models.drafts.residual_draft import ResidualDraftNet as _R
+        from resdraft.models.residual_draft import ResidualDraftNet as _R
         ec_hat, ed_hat = _R.routing_errors(log_ec, log_ed)
         gain_hat = (ec_hat - ed_hat).flatten()
         k = max(int(0.30 * gain_hat.numel()), 1)
