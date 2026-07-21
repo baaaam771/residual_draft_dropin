@@ -9,9 +9,11 @@ models/drafts/residual_draft.py       ~3M CNN: dv_hat + log e_cache + log e_draf
 token_selectors/three_tier.py         2-score routing, hard_idx [B,k] 오름차순
 training/train_residual_draft.py      기존 router_teacher 덤프로 학습 (재수집 불필요)
 training/eval_residual_router.py      offline gate (Stage 3 GPU 실행 전 필수)
-training/diagnose_residual.py         v1 정보병목 가설 검증 (offset별 ratio, dz-identity)
+training/diagnose_residual.py         v1 가설 검증 (+후보식/best-fit α/selection quality)
+training/diagnose_transition.py       dump transition convention 검증 (C1~C4, α*)
+training/diagnose_residual_deep.py    kNN oracle ceiling 등 심층 진단
 samplers/three_tier_flux_fill.py      method: draft_only(Stage 3) / three_tier(Stage 4)
-tests/test_residual_draft.py          회귀 테스트 12개 (CPU)
+tests/test_residual_draft.py          회귀 테스트 14개 (CPU)
 ```
 
 ## Routing
@@ -108,8 +110,15 @@ v2: `--use-latent --use-anchor-x0 --use-sigma-t` (신규 학습 기본 ON) —
 z_t는 sparse step에서 공짜, x̂0_a는 cache.anchor_clean_estimate로 이미 존재.
 v1 checkpoint는 config에 flag가 없으므로 기본 OFF로 그대로 로드된다 (호환).
 
-순서:
+순서 (convention 검증 → arm별 단기 학습 → 판정):
 ```bash
+# -1) TRANSITION CONVENTION 먼저 — 진단의 전제 자체를 검증
+#     (offset-1 identity 9e-2의 원인: 부호/index/scaling/비-Euler 중 무엇인지)
+python -m training.diagnose_transition --teacher $TEACH --shards 6
+#     읽는 법: C1~C4 중 하나가 ~1e-3(fp16 floor)이면 convention 확정,
+#     alpha/dsigma ~ -1이면 부호, 상수 k이면 shifted-sigma scaling,
+#     전부 ~9e-2이면 단일 Euler 관계가 아님(dz에 실제 추가 신호 존재)
+
 # 0) 가설 검증 (v1 ckpt, GPU 수 분)
 python -m training.diagnose_residual --teacher $TEACH --ckpt $CKPT/last.pt
 #   기대: offset-1 dz-identity rel err ~1e-3 이하 (bf16 덤프 오차 수준),
@@ -117,11 +126,16 @@ python -m training.diagnose_residual --teacher $TEACH --ckpt $CKPT/last.pt
 
 # 1) v2 재학습 (새 out 디렉토리)
 python -m training.train_residual_draft --teacher $TEACH     --out ${CKPT}_v2 --steps 60000 --cache-periods 2 3
-#   판정 지점: val mse_ratio_in_mask가 2k step 내에 1.0 아래로 내려가기
-#   시작하는가. 60k까지 1.0이면 콘텐츠를 줘도 residual 외삽이 안 되는 것 —
-#   그 자체로 측정된 negative result (caching은 되고 extrapolation은 안 된다).
-#   그 경우 error head 2개(spearman 0.65+)를 기존 learned router 자리에 넣는
-#   router-reliability 기여로 pivot.
+#   3-arm 단기 실험 (60k 금지, arm당 3k–5k):
+#   S   : --no-use-latent --no-use-anchor-x0            (sigma_t만)
+#   ZS  : --no-use-anchor-x0                            (z_t + sigma_t)
+#   XZS : (기본값 전부 ON)                               (x0_a + z_t + sigma_t)
+#   판정 (val 로그의 두 지표):
+#     mse_ratio_in_mask  : 2k에서 <=0.98 계속 / 5k에서 <=0.95 유망 /
+#                          5k에도 >=0.99 해당 arm 중단
+#     sel_ratio_at30     : <=0.90이면 global ratio가 1.0이어도 three-tier
+#                          가치 있음 (router가 고르는 top-30% 안에서는 draft가
+#                          이긴다는 뜻) — 이 지표가 진짜 go/no-go
 ```
 
 ## 첫 실행 전 5-image closed-loop 진단 (필수)

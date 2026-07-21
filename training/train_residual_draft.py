@@ -171,6 +171,8 @@ def validate(net, pairs, rng, device, bs, n_batches):
     net.eval()
     sr = sd = sri = sdi = 0.0
     sp_c = sp_d = 0.0
+    sel_r = sel_d = 0.0        # top-30pct predicted-gain subset (three-tier
+                               # stop criterion: sel_ratio@30 <= 0.90)
     for _ in range(n_batches):
         b = pairs.batch(bs, rng, device)
         v_a, dz, dv_star, mask_tok = (b["v_anchor"], b["dz"], b["dv_star"],
@@ -184,9 +186,17 @@ def validate(net, pairs, rng, device, bs, n_batches):
         sri += float(e_c[m].sum()); sdi += float(e_d[m].sum())
         sp_c += spearman(log_ec, torch.log(e_c + LOG_EPS))
         sp_d += spearman(log_ed, torch.log(e_d + LOG_EPS))
+        from models.drafts.residual_draft import ResidualDraftNet as _R
+        ec_hat, ed_hat = _R.routing_errors(log_ec, log_ed)
+        gain_hat = (ec_hat - ed_hat).flatten()
+        k = max(int(0.30 * gain_hat.numel()), 1)
+        idx = gain_hat.topk(k).indices
+        sel_r += float(e_c.flatten()[idx].sum())
+        sel_d += float(e_d.flatten()[idx].sum())
     net.train()
     return {"mse_ratio_all": sd / max(sr, 1e-12),        # <1.0: draft beats reuse
             "mse_ratio_in_mask": sdi / max(sri, 1e-12),
+            "sel_ratio_at30": sel_d / max(sel_r, 1e-12),  # <=0.90: three-tier viable
             "spearman_cache_head": sp_c / n_batches,
             "spearman_draft_head": sp_d / n_batches}
 

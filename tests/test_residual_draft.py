@@ -196,6 +196,46 @@ def test_teacher_pair_never_uses_anchor_step():
             assert float(it["dsigma"].abs()) > 0, "degenerate zero-pair"
 
 
+def test_transition_bestfit_alpha():
+    """dz = c * v must be recovered exactly by the best-fit scalar, and the
+    C2 sign candidate must be worst — validates the convention probe."""
+    from training.diagnose_transition import cosine, rel_err
+    torch.manual_seed(0)
+    v = torch.randn(256, 64)
+    ds = -0.04
+    dz = ds * v
+    alpha = float(torch.dot(dz.flatten(), v.flatten())
+                  / torch.dot(v.flatten(), v.flatten()))
+    assert abs(alpha / ds - 1.0) < 1e-5
+    assert rel_err(alpha * v, dz) < 1e-5
+    assert rel_err(ds * v, dz) < 1e-6          # C1 exact
+    assert rel_err(-ds * v, dz) > 1.0          # C2 sign flip is maximally wrong
+    assert abs(cosine(ds * v, dz) - 1.0) < 1e-5
+
+
+def test_selection_ratio_detects_subset_value():
+    """Global draft/reuse ratio = 1.0 can hide a valuable subset: on 30% of
+    tokens the draft wins big, on the rest it loses the same total. The
+    top-K-by-gain selection ratio must expose the win (< 1) while the global
+    ratio stays ~1 — the metric the review demanded."""
+    torch.manual_seed(0)
+    n = 1000
+    e_c = torch.ones(n)
+    e_d = torch.ones(n)
+    e_d[:300] = 0.2                            # draft fixes these
+    e_d[300:] = (n - 300 * 0.2 - 0) / (n - 300) * 1.0
+    e_d[300:] = (n - 0.2 * 300) / (n - 300)    # rebalance: global sums equal
+    g_ratio = float(e_d.sum() / e_c.sum())
+    assert abs(g_ratio - 1.0) < 1e-6
+    gain = e_c - e_d
+    k = 300
+    idx = gain.topk(k).indices
+    sel_ratio = float(e_d[idx].sum() / e_c[idx].sum())
+    assert sel_ratio < 0.25, sel_ratio
+    assert set(idx.tolist()) == set(range(300))
+
+
+
 def test_content_inputs_and_v1_compat():
     """v2 content inputs change in_ch as configured; v1 4-key configs still
     load with content flags defaulting OFF (checkpoint compat)."""
