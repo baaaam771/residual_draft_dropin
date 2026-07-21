@@ -13,7 +13,7 @@ training/diagnose_residual.py         v1 가설 검증 (+후보식/best-fit α/s
 training/diagnose_transition.py       dump transition convention 검증 (C1~C4, α*)
 training/diagnose_residual_deep.py    kNN oracle ceiling 등 심층 진단
 samplers/three_tier_flux_fill.py      method: draft_only(Stage 3) / three_tier(Stage 4)
-tests/test_residual_draft.py          회귀 테스트 14개 (CPU)
+tests/test_residual_draft.py          회귀 테스트 15개 (CPU)
 ```
 
 ## Routing
@@ -136,6 +136,32 @@ python -m training.train_residual_draft --teacher $TEACH     --out ${CKPT}_v2 --
 #     sel_ratio_at30     : <=0.90이면 global ratio가 1.0이어도 three-tier
 #                          가치 있음 (router가 고르는 top-30% 안에서는 draft가
 #                          이긴다는 뜻) — 이 지표가 진짜 go/no-go
+```
+
+## PIVOT: error head -> router (진단 체인 종결 후 확정된 경로)
+
+진단 결론(3중): residual 방향은 어떤 회귀기로도 접근 불가 (kNN ceiling 1.056
+@ pool 20k), transition은 정확한 Euler (8.4% 편차 = bf16 정밀도, corr 1.000),
+magnitude ranking은 spearman 0.75. => "reuse-or-recompute는 강제 구조"가
+negative result로 확정. error head를 기존 learned router 슬롯(η term)에
+장착한다 — `models/drafts/error_head_router.py`가 RouterDraft와 동일
+인터페이스이고, `cached_flux_fill.py`의 `--draft-ckpt`가 checkpoint를
+자동 감지한다 (model_config 키 있으면 ErrorHeadRouter, 없으면 기존 CNN router).
+
+```bash
+# headline operating point 재측정: router := error head (3 seeds, 순차 실행)
+# ckpt는 v2 smoke(spearman 0.75) 또는 heads 전용 재학습본 아무거나
+for SEED in 0 1 2; do
+python -m samplers.cached_flux_fill --manifest data/coco_manifest_1024.json \
+    --out out/stage_pivot --tag ehr_c2_r03_dualkv_s$SEED \
+    --selector mbd_draft --draft-ckpt $CKPT_V2/last.pt \
+    --cache-period 2 --ratio 0.3 --dense-tail 4 --dual-sparse --kv-cache \
+    --seed-offset $SEED --prompt-cache $PC --limit 100
+done
+# 비교 arm: 동일 커맨드에서 (1) --selector mbd (router 없음),
+# (2) --draft-ckpt <기존 CNN router ckpt> (자동으로 RouterDraft 로드)
+# 지표: mean mask-LPIPS→ref / seed std / worst seed / small-mask 셀
+# 성공 기준: CNN router의 0.0288±0.0003 대비 mean 동등 이상 + std 동등 이하
 ```
 
 ## 첫 실행 전 5-image closed-loop 진단 (필수)

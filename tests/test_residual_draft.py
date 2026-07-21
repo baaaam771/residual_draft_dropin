@@ -299,6 +299,47 @@ def test_hard_idx_convention():
         "hard_idx must be sorted ascending (sparse_forward convention)"
 
 
+
+def test_error_head_router_interface():
+    """ErrorHeadRouter must be a drop-in for RouterDraft: same .scores()
+    signature, [B, N] output, monotone in the head, and the factory must
+    route residual-draft ckpts to it."""
+    import tempfile as _tf
+
+    from models.drafts.error_head_router import ErrorHeadRouter, load_draft
+    from models.flux_cache import FluxAnchorCache
+    from utils.token_mapping import TokenGrid
+
+    net = ResidualDraftNet(hidden=64, num_blocks=2, use_latent=True,
+                           use_anchor_x0=True, use_sigma_t=True)
+    with _tf.TemporaryDirectory() as td:
+        p = os.path.join(td, "ck.pt")
+        torch.save({"model": net.state_dict(), "ema": net.state_dict(),
+                    "model_config": net.config}, p)
+        router = load_draft(p, "cpu")
+        assert isinstance(router, ErrorHeadRouter), "factory must auto-detect"
+
+        grid = TokenGrid(512, 512).validate()
+        n = grid.token_hw[0] * grid.token_hw[1]
+        cache = FluxAnchorCache()
+        z_a = torch.randn(1, n, 64)
+        v_a = torch.randn(1, n, 64)
+        sigma_a = torch.tensor(0.54)
+        cache.begin_anchor(torch.tensor([0.54]), 0)
+        cache.finish_anchor(v_a, torch.zeros(1, 1, 1), torch.zeros(1, 1, 1))
+        cache.set_anchor_context(z_a, sigma_a)
+
+        z_t = z_a + 0.05 * torch.randn(1, n, 64)
+        mask = torch.zeros(1, n); mask[:, : n // 4] = 1
+        s = router.scores(z_t, mask, cache, torch.tensor([500.0]), grid)
+        assert s.shape == (1, n)
+        assert torch.isfinite(s).all()
+        # deterministic + input-sensitive (not a constant map)
+        s2 = router.scores(z_t, mask, cache, torch.tensor([500.0]), grid)
+        assert torch.equal(s, s2)
+        assert float(s.std()) > 0
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
