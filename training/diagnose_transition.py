@@ -68,6 +68,7 @@ def main():
     cand_rel = defaultdict(list)
     cand_cos = defaultdict(list)
     alpha_ratio, bestfit_rel = [], []
+    fp16_floor, fp16_excess, dz_over_z = [], [], []
     n_done = 0
 
     for name in shard_names:
@@ -98,6 +99,16 @@ def main():
                           torch.dot(va, va).clamp_min(1e-12))
             alpha_ratio.append(alpha / ds if ds != 0 else float("nan"))
             bestfit_rel.append(rel_err(alpha * v[j], dz))
+            # fp16-cancellation attribution: dz is a small difference of two
+            # LARGE fp16-stored latents, so quantization noise is amplified by
+            # ||z|| / ||dz||. Predicted rel-err floor from storage alone:
+            #   sqrt(2) * eps_rms * ||z|| / ||dz||,  eps_rms ~ 2^-10/sqrt(12)
+            eps_rms = (2.0 ** -10) / (12 ** 0.5)
+            z_rms = float(0.5 * (lat[j].norm() + lat[j + 1].norm()))
+            floor = (2 ** 0.5) * eps_rms * z_rms / float(dz.norm())
+            fp16_floor.append(floor)
+            fp16_excess.append(rel_err(ds * v[j], dz) / max(floor, 1e-12))
+            dz_over_z.append(float(dz.norm()) / z_rms)
             n_done += 1
         if n_done >= a.max_transitions:
             break
@@ -122,6 +133,27 @@ def main():
     print(f"  best-fit rel:  mean {float(bf.mean()):.3e}  "
           f"max {float(bf.max()):.3e}")
 
+    fl = torch.tensor(fp16_floor); ex = torch.tensor(fp16_excess)
+    dzz = torch.tensor(dz_over_z)
+    print("== fp16-cancellation attribution ==")
+    print(f"  ||dz||/||z||:            mean {float(dzz.mean()):.4f}  "
+          f"min {float(dzz.min()):.4f}  max {float(dzz.max()):.4f}")
+    print(f"  predicted fp16 floor:    mean {float(fl.mean()):.3e}  "
+          f"max {float(fl.max()):.3e}")
+    print(f"  measured / floor:        mean {float(ex.mean()):.2f}  "
+          f"median {float(ex.median()):.2f}  max {float(ex.max()):.2f}")
+    # correlation across transitions: pure-storage noise makes rel err track
+    # 1/(||dz||/||z||) exactly
+    c1 = torch.tensor(cand_rel["C1 +ds*v_j"])
+    inv = 1.0 / dzz
+    cor = float(torch.corrcoef(torch.stack([c1, inv]))[0, 1])
+    print(f"  corr(C1 rel err, ||z||/||dz||): {cor:.3f}")
+    print("READ (fp16 attribution):")
+    print("  measured/floor ~ 1-2 and corr ~ 1  -> the 8e-2 is STORAGE noise; "
+          "convention is exact Euler; dz carries no real extra signal beyond "
+          "v_a at offset 1")
+    print("  measured/floor >> 2 (e.g. > 5)     -> a real non-Euler component "
+          "exists in the stored variables; dz has genuine extra signal")
     print("READ:")
     print(f"  best candidate: {best[0]} (mean rel {best[1]:.3e}; fp16 floor "
           "~1e-3 counts as exact)")
